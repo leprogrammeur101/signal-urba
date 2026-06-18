@@ -1,0 +1,118 @@
+// ============================================================
+// schema.prisma — Signal'Urba
+// Compatible Prisma v7 + NestJS (CommonJS)
+// ============================================================
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  CITIZEN
+  ADMIN
+}
+
+enum ReportStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String?
+  lastName     String?
+  role         Role     @default(CITIZEN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reports         Report[]
+  statusHistories StatusHistory[]
+  refreshTokens   RefreshToken[]
+
+  @@map("users")
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  icon      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  reports Report[]
+
+  @@map("categories")
+}
+
+model Report {
+  id          String       @id @default(cuid())
+  title       String?
+  description String?
+  photoUrl    String?
+  latitude    Float
+  longitude   Float
+  address     String?
+  status      ReportStatus @default(NEW)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  statusHistories StatusHistory[]
+
+  @@index([latitude, longitude])
+  @@index([status])
+  @@index([categoryId])
+  @@index([userId])
+  @@map("reports")
+}
+
+model StatusHistory {
+  id        String       @id @default(cuid())
+  status    ReportStatus
+  comment   String?
+  changedAt DateTime     @default(now())
+
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  changedById String
+  changedBy   User   @relation(fields: [changedById], references: [id])
+
+  @@map("status_histories")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revoked   Boolean  @default(false)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("refresh_tokens")
+}
