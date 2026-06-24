@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable, NotFoundException, ForbiddenException, BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateReportDto } from './dto/create-report.dto';
@@ -28,11 +30,19 @@ const REPORT_SELECT = {
 @Injectable()
 export class ReportsService {
   constructor(
-    private prisma:         PrismaService,
-    private notifications:  NotificationsService,
+    private prisma:        PrismaService,
+    private notifications: NotificationsService,
   ) {}
 
   async create(userId: string, dto: CreateReportDto) {
+    // 🟡 FIX : Valider que la catégorie existe réellement en base
+    const category = await this.prisma.category.findUnique({
+      where: { id: dto.categoryId },
+    });
+    if (!category) {
+      throw new BadRequestException(`Catégorie introuvable : ${dto.categoryId}`);
+    }
+
     return this.prisma.report.create({
       data:   { ...dto, userId },
       select: REPORT_SELECT,
@@ -54,15 +64,23 @@ export class ReportsService {
       this.prisma.report.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findByUser(userId: string) {
-    return this.prisma.report.findMany({
-      where:   { userId },
-      select:  REPORT_SELECT,
-      orderBy: { createdAt: 'desc' },
-    });
+  async findByUser(userId: string, page = 1, limit = 20) {
+    // 🟡 FIX : Pagination ajoutée sur findByUser
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      this.prisma.report.findMany({
+        where:   { userId },
+        select:  REPORT_SELECT,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.report.count({ where: { userId } }),
+    ]);
+    return { data, total, page, limit };
   }
 
   async findOne(id: string) {
@@ -106,12 +124,9 @@ export class ReportsService {
       }),
     ]);
 
-    // Notifier le citoyen
+    // Notification push au citoyen
     await this.notifications.notifyStatusChange(
-      id,
-      report.userId,
-      dto.status,
-      dto.comment,
+      id, report.userId, dto.status, dto.comment,
     );
 
     return updated;
