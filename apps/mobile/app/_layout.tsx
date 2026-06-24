@@ -9,6 +9,7 @@ export default function RootLayout() {
     loadFromStorage();
   }, []);
 
+  // Redirection selon l'état d'auth
   useEffect(() => {
     if (!isLoading) {
       if (accessToken) {

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { FilterReportsDto } from './dto/filter-reports.dto';
@@ -26,35 +27,29 @@ const REPORT_SELECT = {
 
 @Injectable()
 export class ReportsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma:         PrismaService,
+    private notifications:  NotificationsService,
+  ) {}
 
-  // ── Créer un signalement ───────────────────────────────────
   async create(userId: string, dto: CreateReportDto) {
     return this.prisma.report.create({
-      data: {
-        ...dto,
-        userId,
-      },
+      data:   { ...dto, userId },
       select: REPORT_SELECT,
     });
   }
 
-  // ── Liste avec filtres et pagination ──────────────────────
   async findAll(filters: FilterReportsDto) {
     const { status, categoryId, page = 1, limit = 20 } = filters;
     const skip = (page - 1) * limit;
-
     const where: any = {};
     if (status)     where.status     = status;
     if (categoryId) where.categoryId = categoryId;
 
     const [data, total] = await Promise.all([
       this.prisma.report.findMany({
-        where,
-        select:  REPORT_SELECT,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
+        where, select: REPORT_SELECT,
+        orderBy: { createdAt: 'desc' }, skip, take: limit,
       }),
       this.prisma.report.count({ where }),
     ]);
@@ -62,7 +57,6 @@ export class ReportsService {
     return { data, total, page, limit };
   }
 
-  // ── Signalements d'un utilisateur ────────────────────────
   async findByUser(userId: string) {
     return this.prisma.report.findMany({
       where:   { userId },
@@ -71,7 +65,6 @@ export class ReportsService {
     });
   }
 
-  // ── Détail d'un signalement ───────────────────────────────
   async findOne(id: string) {
     const report = await this.prisma.report.findUnique({
       where:  { id },
@@ -79,13 +72,8 @@ export class ReportsService {
         ...REPORT_SELECT,
         statusHistories: {
           select: {
-            id:       true,
-            status:   true,
-            comment:  true,
-            changedAt: true,
-            changedBy: {
-              select: { id: true, firstName: true, lastName: true },
-            },
+            id: true, status: true, comment: true, changedAt: true,
+            changedBy: { select: { id: true, firstName: true, lastName: true } },
           },
           orderBy: { changedAt: 'desc' },
         },
@@ -95,9 +83,11 @@ export class ReportsService {
     return report;
   }
 
-  // ── Changer le statut (admin seulement) ───────────────────
   async updateStatus(id: string, adminId: string, dto: UpdateStatusDto) {
-    const report = await this.prisma.report.findUnique({ where: { id } });
+    const report = await this.prisma.report.findUnique({
+      where:  { id },
+      select: { userId: true },
+    });
     if (!report) throw new NotFoundException('Signalement introuvable');
 
     const [updated] = await Promise.all([
@@ -116,10 +106,17 @@ export class ReportsService {
       }),
     ]);
 
+    // Notifier le citoyen
+    await this.notifications.notifyStatusChange(
+      id,
+      report.userId,
+      dto.status,
+      dto.comment,
+    );
+
     return updated;
   }
 
-  // ── Supprimer (auteur ou admin) ───────────────────────────
   async remove(id: string, userId: string, userRole: string) {
     const report = await this.prisma.report.findUnique({ where: { id } });
     if (!report) throw new NotFoundException('Signalement introuvable');
