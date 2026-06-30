@@ -5,12 +5,14 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { reportsApi } from '../../api/reports';
 import { categoriesApi } from '../../api/categories';
-import api from '../../api/client';
 import { useAuthStore } from '../../store/auth.store';
 import type { Category } from '../../types';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 // Géocodage inverse Nominatim
 async function reverseGeocode(lat: number, lon: number): Promise<string> {
@@ -36,7 +38,13 @@ async function reverseGeocode(lat: number, lon: number): Promise<string> {
 }
 
 // Upload vers Cloudinary via l'API backend
+// On utilise fetch() natif plutôt qu'Axios pour l'upload multipart :
+// quand on passe Content-Type manuellement à Axios, l'intercepteur Authorization
+// peut être ignoré. fetch() + FormData RN envoie les deux headers correctement.
 async function uploadPhoto(uri: string): Promise<string> {
+  const token = await AsyncStorage.getItem('accessToken');
+  if (!token) throw new Error('Non authentifié');
+
   const formData = new FormData();
   const filename = uri.split('/').pop() ?? 'photo.jpg';
   const match    = /\.(\w+)$/.exec(filename);
@@ -44,10 +52,21 @@ async function uploadPhoto(uri: string): Promise<string> {
 
   formData.append('file', { uri, name: filename, type } as any);
 
-  const res = await api.post<{ url: string }>('/uploads/image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  // Ne pas forcer Content-Type : fetch() génère automatiquement
+  // le bon boundary multipart/form-data
+  const response = await fetch(`${API_URL}/uploads/image`, {
+    method:  'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body:    formData,
   });
-  return res.data.url;
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.message ?? `Erreur serveur ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.url;
 }
 
 export default function NewReportScreen() {
@@ -95,7 +114,7 @@ export default function NewReportScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality:    0.8,
       allowsEditing: true,
       aspect:     [4, 3],
@@ -124,7 +143,7 @@ export default function NewReportScreen() {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality:       0.8,
       allowsEditing: true,
       aspect:        [4, 3],
