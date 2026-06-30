@@ -137,6 +137,18 @@ export default function DashboardPage() {
             </div>
 
             <div className="space-y-3">
+              {selected.photoUrl && (
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Photo</p>
+                  <a href={selected.photoUrl} target="_blank" rel="noreferrer">
+                    <img
+                      src={selected.photoUrl}
+                      alt={selected.title || `Photo du signalement ${selected.id}`}
+                      className="w-full h-44 object-cover rounded border border-gray-200"
+                    />
+                  </a>
+                </div>
+              )}
               <div>
                 <p className="text-xs text-gray-400">Catégorie</p>
                 <p className="font-medium">{selected.category.name}</p>

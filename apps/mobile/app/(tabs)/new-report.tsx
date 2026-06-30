@@ -14,6 +14,15 @@ import type { Category } from '../../types';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+function getImageMimeType(filename: string): string {
+  const extension = filename.split('.').pop()?.toLowerCase();
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  if (extension === 'png') return 'image/png';
+  if (extension === 'webp') return 'image/webp';
+  if (extension === 'gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
 // Géocodage inverse Nominatim
 async function reverseGeocode(lat: number, lon: number): Promise<string> {
   try {
@@ -47,26 +56,34 @@ async function uploadPhoto(uri: string): Promise<string> {
 
   const formData = new FormData();
   const filename = uri.split('/').pop() ?? 'photo.jpg';
-  const match    = /\.(\w+)$/.exec(filename);
-  const type     = match ? `image/${match[1]}` : 'image/jpeg';
+  const type     = getImageMimeType(filename);
 
   formData.append('file', { uri, name: filename, type } as any);
 
-  // Ne pas forcer Content-Type : fetch() génère automatiquement
-  // le bon boundary multipart/form-data
-  const response = await fetch(`${API_URL}/uploads/image`, {
-    method:  'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body:    formData,
+  // Ne pas forcer Content-Type : XHR genere automatiquement
+  // le bon boundary multipart/form-data.
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_URL}/uploads/image`);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText || '{}');
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data.url);
+          return;
+        }
+        reject(new Error(data?.message ?? `Erreur serveur ${xhr.status}`));
+      } catch {
+        reject(new Error(`Reponse upload invalide (${xhr.status})`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Erreur reseau pendant l\'upload'));
+    xhr.ontimeout = () => reject(new Error('Timeout pendant l\'upload'));
+    xhr.send(formData);
   });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.message ?? `Erreur serveur ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.url;
 }
 
 export default function NewReportScreen() {
